@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Student Support Advisory</title>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--ink:#1c2333;--mute:#667085;--line:#e3e7ef;--accent:#3b5bdb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
+header{background:var(--accent);color:#fff;padding:22px 16px}
+header h1{margin:0;font-size:22px} header p{margin:4px 0 0;opacity:.9;font-size:13px}
+main{max-width:980px;margin:20px auto;padding:0 16px;display:grid;gap:16px;grid-template-columns:1fr 1fr}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}
+.card h2{margin:0 0 12px;font-size:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label{display:block;font-size:12px;color:var(--mute)}
+input{width:100%;margin-top:3px;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:14px}
+button{margin-top:14px;width:100%;padding:11px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+button:disabled{opacity:.6}
+.band{display:inline-block;padding:4px 14px;border-radius:999px;color:#fff;font-weight:700}
+.High{background:#d63939}.Medium{background:#e8890c}.Low{background:#2f9e44}
+.bar{height:10px;background:var(--line);border-radius:6px;margin:10px 0;overflow:hidden}
+.bar>div{height:100%;background:var(--accent)}
+ul{padding-left:18px;margin:6px 0}
+.note{font-size:13px;color:var(--mute)} .err{color:#d63939;font-weight:600}
+.warn{background:#fff8e6;border:1px solid #ffe08a;border-radius:8px;padding:10px;font-size:13px;margin-top:10px}
+.hint{font-size:12px;color:var(--mute);margin:8px 0 0}
+</style></head><body>
+<header><h1>Student Support Advisory</h1>
+<p>Decision support only: a teacher must review every result. Not for grading, punishment or admission.</p></header>
+<main>
+<section class="card"><h2>Student signals (weeks 1&ndash;8)</h2>
+<div class="grid" id="form"></div>
+<p class="hint">Rates are 0&ndash;1 (0.75 = 75%). Scores are 0&ndash;100. Leave an optional box empty if unknown.</p>
+<button id="go" onclick="go()">Predict support need</button></section>
+<section class="card" id="result"><h2>Result</h2>
+<p class="note">Fill in the signals and press the button. The prediction comes from the trained model.</p></section>
+</main>
+<script>
+const FIELDS=[
+["attendance_rate","Overall attendance",0.70,1],["attendance_recent","Recent attendance (wk 5-8)",0.60,0],
+["assignment_completion","Assignment completion",0.55,1],["late_submission_rate","Late submission rate",0.30,1],
+["lms_hours_per_week","LMS hours / week",3,0],["prev_score_1","Previous score 1 (oldest)",55,0],
+["prev_score_2","Previous score 2",48,1],["prev_score_3","Previous score 3 (latest)",44,1]];
+const form=document.getElementById('form');
+FIELDS.forEach(([k,l,v,req])=>{form.insertAdjacentHTML('beforeend',
+ `<label>${l}${req?' *':''}<input id="${k}" type="number" step="any" value="${v}"></label>`)});
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+async function go(){
+ const out=document.getElementById('result'),btn=document.getElementById('go');
+ const body={};
+ for(const [k] of FIELDS){const v=document.getElementById(k).value.trim();body[k]=v===''?null:Number(v)}
+ btn.disabled=true;out.innerHTML='<h2>Result</h2><p class="note">Predicting...</p>';
+ try{
+  const r=await fetch('/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const text=await r.text();let d;try{d=JSON.parse(text)}catch(e){d=null}
+  if(!r.ok||!d){
+    const msg=d&&d.detail?(typeof d.detail==='string'?d.detail:d.detail.map(x=>(x.loc||[]).slice(-1)+': '+x.msg).join('; ')):text;
+    out.innerHTML='<h2>Result</h2><p class="err">Request failed ('+r.status+')</p><p class="note">'+esc(msg)+'</p>';return}
+  const sig=d.top_signals.map(s=>`<li><b>${esc(s.signal)}</b> = ${s.value}: ${esc(s.effect)} (impact ${s.impact})</li>`).join('');
+  const notes=d.uncertainty_notes.map(n=>`<li>${esc(n)}</li>`).join('');
+  out.innerHTML=`<h2>Result</h2><span class="band ${d.risk_band}">${d.risk_band} risk</span>
+   <p style="margin:10px 0 0">Estimated probability of scoring below 50: <b>${(d.risk_probability*100).toFixed(1)}%</b></p>
+   <div class="bar"><div style="width:${d.risk_probability*100}%"></div></div>
+   <p style="margin:6px 0 0">${d.flagged_for_support?'Suggested: offer a support check-in.':'No support flag from the model.'}</p>
+   <h2 style="margin-top:14px">Most influential signals</h2><ul>${sig}</ul>
+   <h2>Uncertainty</h2><ul class="note">${notes}</ul>
+   <div class="warn"><b>Human review:</b> ${esc(d.human_review_note)}</div>
+   <p class="note">Model: ${esc(d.model)}</p>`;
+ }catch(e){out.innerHTML='<h2>Result</h2><p class="err">Could not reach the API.</p><p class="note">'+esc(e)+'</p>'}
+ finally{btn.disabled=false}
+}
+</script></body></html>
